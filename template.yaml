@@ -1,0 +1,177 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AppFlowRetry
+
+  AM Template for AppFlowRetry
+Resources:
+
+  StateMachineToLanbdaConnector:
+    Type: AWS::Serverless::Connector # More info about Connector Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-connector.html
+    Properties:
+      Source:
+        Id: AppFlowRetryStateMachine
+      Destination:
+      - Id: AppFlowRetryLambda
+      - Id: AppFlowRetryExponentialLambda
+      Permissions:
+      - Write
+      
+
+  EventBridgeToLanbdaConnector:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: AppFlowRetryEventBridgeRule
+      Destination:
+        Id: AppFlowRetryLambda
+      Permissions:
+      - Write  
+      
+  LambdaToStateMachine:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: AppFlowRetryLambda
+      Destination:
+      - Id: AppFlowRetryStateMachine
+      - Id: AppFlowRetrySnsTopic
+      Permissions:
+      - Write  
+      
+  LambdaExponentialToStateMachine:
+    Type: AWS::Serverless::Connector
+    Properties:
+      Source:
+        Id: AppFlowRetryExponentialLambda
+      Destination:
+      - Id: AppFlowRetryStateMachine
+      - Id: AppFlowRetrySnsTopic
+      Permissions:
+      - Write  
+      
+  AppFlowRetrySnsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription: 
+        - Endpoint: !Ref AppFlowEmailNotification
+          Protocol: email
+
+
+  AppFlowRetryLambda:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html
+    Properties:
+      CodeUri: functions/app-flow-retry/
+      Handler: lambda-retry.handler
+      Runtime: nodejs16.x
+      Architectures:
+      - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A Lambda function that returns a static string.
+      Policies:
+        # Give Lambda basic execution Permission to the appflowretry
+      - AWSLambdaBasicExecutionRole
+      - AmazonAppFlowFullAccess
+      Environment:
+        Variables:
+          StateMachineArn: !GetAtt AppFlowRetryStateMachine.Arn
+          SNStopicArn: !Ref AppFlowRetrySnsTopic
+          IntervalMinutes: !Ref AppFlowIntervalMinutes
+          MaxRetry: !Ref AppFlowMaxRetry
+          
+  AppFlowRetryExponentialLambda:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html
+    Properties:
+      CodeUri: functions/app-flow-execution/
+      Handler: lambda-retry.handler
+      Runtime: nodejs16.x
+      Architectures:
+      - x86_64
+      MemorySize: 128
+      Timeout: 100
+      Description: A Lambda function that returns a static string.
+      Policies:
+        # Give Lambda basic execution Permission to the appflowretry
+      - AWSLambdaBasicExecutionRole
+      - AmazonAppFlowFullAccess
+  
+  AppFlowRetryStateMachine:
+    Type: AWS::Serverless::StateMachine # More info about State Machine Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-statemachine.html
+    Properties:
+      DefinitionUri: statemachine/app_flow_retry_state_machine.asl.json
+      DefinitionSubstitutions:
+        AppFlowRetryLambdaFunctionArn: !GetAtt AppFlowRetryExponentialLambda.Arn
+      Policies:
+      - CloudWatchPutMetricPolicy: {}
+  
+  AppFlowRetryEventBridgeRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      EventPattern:
+        source: 
+          - "aws.appflow"
+        detail-type:
+          - "AppFlow End Flow Run Report"
+        detail.flow-arn:
+          - { "Ref" : "AppFlowArn" }
+      Targets:
+        - 
+          Arn: 
+            Fn::GetAtt: 
+              - "AppFlowRetryLambda"
+              - "Arn"
+          Id: "AppFlowRetryLambda"
+          
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Ref: ApplicationResourceGroup
+      AutoConfigurationEnabled: 'true'
+
+Parameters:
+  AppFlowArn:
+    Type: String
+    Default: process1
+    Description: Enter appflow arn
+  AppFlowEmailNotification:
+    Type: String
+    Default: test@example.com
+    Description: Enter notification error email
+  AppFlowIntervalMinutes:
+    Type: Number
+    Default: 1
+    Description: Enter interval of retry (minutes)
+  AppFlowMaxRetry:
+    Type: Number
+    Default: 5
+    Description: Enter max retry tentatives
+
+Outputs:
+  # StockTradingStateMachineHourlyTradingSchedule is an implicit Schedule event rule created out of Events key under Serverless::StateMachine
+  # Find out more about other implicit resources you can reference within SAM
+  # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-specification-generated-resources.html
+
+  AppFlowRetryStateMachineArn:
+    Description: AppFlowStepFunction
+    Value: !Ref AppFlowRetryStateMachine
+  AppFlowRetryLambdaArn:
+    Description: AppFlowRetryLambda
+    Value: !Ref AppFlowRetryLambda
+  AppFlowRetryExponentialLambdaArn:
+    Description: AppFlowRetryExponentialLambda
+    Value: !Ref AppFlowRetryExponentialLambda
+# # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Tracing: Active
+  Api:
+    TracingEnabled: true
