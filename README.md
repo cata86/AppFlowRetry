@@ -8,6 +8,8 @@ The Lambda function will be responsible for handling the retry logic. It can exa
 
 By setting up this EventBridge and Lambda-based retry mechanism, you can enhance the reliability of your Amazon AppFlow integrations, ensuring that data flows smoothly, even in the face of occasional failures. This approach allows you to add a level of customization and control over the retry process to suit your specific use case.
 
+![AppFlowRetry](https://github.com/cata86/AppFlowRetry/blob/main/resources/AppFlowRetry.png?raw=true)
+
 
 This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI. It includes the following files and folders:
 
